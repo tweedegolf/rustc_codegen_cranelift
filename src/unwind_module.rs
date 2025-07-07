@@ -19,7 +19,7 @@ use crate::UnwindContext;
 pub(crate) struct UnwindModule<T> {
     pub(crate) module: T,
     unwind_context: UnwindContext,
-    cache: Option<InMemoryCache>,
+    pub(crate) cache: Option<InMemoryCache>,
 }
 
 impl<T: Module> UnwindModule<T> {
