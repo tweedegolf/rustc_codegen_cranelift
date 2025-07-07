@@ -76,6 +76,7 @@ mod optimize;
 mod pointer;
 mod pretty_clif;
 pub mod rustc_daemon;
+mod serializable_module;
 mod toolchain;
 mod unsize;
 mod unwind_module;
