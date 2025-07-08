@@ -38,7 +38,7 @@ pub(crate) struct AotModule {
     producer: String,
     global_asm_config: GlobalAsmConfig,
     module: UnwindModule<ObjectModule>,
-    codegened_functions: Vec<SerializableModule>,
+    codegened_functions: Vec<(SerializableModule, Option<Fingerprint>)>,
     global_asm: String,
 }
 
@@ -184,11 +184,10 @@ fn codegen_cgu(tcx: TyCtxt<'_>, cgu_name: Symbol, cache: Option<InMemoryCache>) 
                         .unwrap();
                     module
                         .codegened_functions
-                        .push(SerializableModule::deserialize(&data, isa.clone()));
+                        .push((SerializableModule::deserialize(&data, isa.clone()), None));
                     continue;
                 };
 
-                let mut cache = module.module.cache.clone().unwrap();
                 let (ser_module, _) = tcx.dep_graph.with_task(
                     dep_node,
                     tcx,
@@ -217,16 +216,12 @@ fn codegen_cgu(tcx: TyCtxt<'_>, cgu_name: Symbol, cache: Option<InMemoryCache>) 
 
                         ser_module.add_global_asm(&global_asm);
 
-                        let data = ser_module.serialize();
-
-                        cache.insert(&cache_key.to_le_bytes(), data.to_vec());
-
                         ser_module
                     },
                     Some(rustc_middle::dep_graph::hash_result),
                 );
 
-                module.codegened_functions.push(ser_module);
+                module.codegened_functions.push((ser_module, Some(cache_key)));
             }
             MonoItem::Static(def_id) => {
                 crate::constant::codegen_static(tcx, &mut module.module, def_id);
@@ -258,7 +253,17 @@ fn compile_cgu(
             prof.clone(),
         )));
 
-        for codegened_func in aot_module.codegened_functions {
+        for (mut codegened_func, cache_key) in aot_module.codegened_functions {
+            if let Some(cache_key) = cache_key {
+                let data = codegened_func.serialize();
+                aot_module
+                    .module
+                    .cache
+                    .as_mut()
+                    .unwrap()
+                    .insert(&cache_key.to_le_bytes(), data.to_vec());
+            }
+
             let asm = codegened_func.apply_to(&mut aot_module.module);
             aot_module.global_asm.push_str(&asm);
         }
