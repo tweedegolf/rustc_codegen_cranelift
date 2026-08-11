@@ -44,11 +44,13 @@ pub(crate) fn build_sysroot(
     let is_native = bootstrap_host_compiler.target == target_tuple;
 
     let cg_clif_dylib_path = match cg_clif_dylib_src {
-        CodegenBackend::Local(src_path) => {
+        CodegenBackend::Local((backend_path, daemon_path)) => {
             // Copy the backend
-            let cg_clif_dylib_path = dist_dir.join("lib").join(src_path.file_name().unwrap());
-            try_hard_link(src_path, &cg_clif_dylib_path);
-            CodegenBackend::Local(cg_clif_dylib_path)
+            let cg_clif_dylib_path = dist_dir.join("lib").join(backend_path.file_name().unwrap());
+            try_hard_link(backend_path, &cg_clif_dylib_path);
+            let daemon_dest_path = dist_dir.join("bin").join(daemon_path.file_name().unwrap());
+            try_hard_link(daemon_path, &daemon_dest_path);
+            CodegenBackend::Local((cg_clif_dylib_path, daemon_dest_path))
         }
         CodegenBackend::Builtin(name) => CodegenBackend::Builtin(name.clone()),
     };
@@ -78,7 +80,7 @@ pub(crate) fn build_sysroot(
 
     // Build and copy rustc and cargo wrappers
     let wrapper_base_name = get_file_name(&bootstrap_host_compiler.rustc, "____", "bin");
-    for wrapper in ["rustc-clif", "rustdoc-clif", "cargo-clif"] {
+    for wrapper in ["rustc-clif", "cargo-clif"] {
         let wrapper_name = wrapper_base_name.replace("____", wrapper);
 
         let mut build_cargo_wrapper_cmd = Command::new(&bootstrap_host_compiler.rustc);
@@ -226,8 +228,8 @@ fn build_clif_sysroot_for_target(
         rustflags.push("-Cpanic=abort".to_owned());
     }
     match cg_clif_dylib_path {
-        CodegenBackend::Local(path) => {
-            rustflags.push(format!("-Zcodegen-backend={}", path.to_str().unwrap()));
+        CodegenBackend::Local((backend_path, _daemon_path)) => {
+            rustflags.push(format!("-Zcodegen-backend={}", backend_path.to_str().unwrap()));
         }
         CodegenBackend::Builtin(name) => {
             rustflags.push(format!("-Zcodegen-backend={name}"));

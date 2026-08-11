@@ -62,7 +62,7 @@ pub(crate) fn run(
     cmd.arg("--add-rustc-codegen-backend");
     match cg_clif_dylib {
         CodegenBackend::Local(path) => {
-            cmd.arg(format!("cgclif:{}", path.display()));
+            cmd.arg(format!("cgclif:{}", path.0.display()));
         }
         CodegenBackend::Builtin(name) => {
             cmd.arg(format!("cgclif:{name}"));

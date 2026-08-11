@@ -17,7 +17,12 @@ fn main() {
         rustflags.push("-Cpanic=abort".to_owned());
         rustflags.push("-Zpanic-abort-tests".to_owned());
     }
-    if let Some(name) = option_env!("BUILTIN_BACKEND") {
+    if std::env::var("CG_CLIF_USE_DAEMON").is_ok() {
+        env::set_var(
+            "RUSTC",
+            sysroot.join("bin").join("rustc-daemon".to_owned() + env::consts::EXE_SUFFIX),
+        );
+    } else if let Some(name) = option_env!("BUILTIN_BACKEND") {
         rustflags.push(format!("-Zcodegen-backend={name}"));
     } else {
         let dylib = sysroot.join("lib").join(

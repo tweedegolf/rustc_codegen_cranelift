@@ -21,7 +21,8 @@ fn main() {
         args.push(OsString::from("-Cpanic=abort"));
         args.push(OsString::from("-Zpanic-abort-tests"));
     }
-    if let Some(name) = option_env!("BUILTIN_BACKEND") {
+    if std::env::var("CG_CLIF_USE_DAEMON").is_ok() {
+    } else if let Some(name) = option_env!("BUILTIN_BACKEND") {
         args.push(OsString::from(format!("-Zcodegen-backend={name}")))
     } else {
         let mut codegen_backend_arg = OsString::from("-Zcodegen-backend=");
@@ -42,7 +43,18 @@ fn main() {
     }
     args.extend(passed_args);
 
-    let rustc = if let Some(rustc) = option_env!("RUSTC") {
+    let rustc = if std::env::var("CG_CLIF_USE_DAEMON").is_ok() {
+        args.insert(
+            0,
+            sysroot
+                .join("bin")
+                .join("rustc-daemon".to_owned() + env::consts::EXE_SUFFIX)
+                .into_os_string(),
+        );
+        args.insert(0, OsString::from(option_env!("TOOLCHAIN_NAME").expect("TOOLCHAIN_NAME")));
+        args.insert(0, OsString::from("run"));
+        "rustup"
+    } else if let Some(rustc) = option_env!("RUSTC") {
         rustc
     } else {
         // Ensure that the right toolchain is used

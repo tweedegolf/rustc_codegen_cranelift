@@ -13,13 +13,14 @@ pub(crate) fn build_backend(
     bootstrap_host_compiler: &Compiler,
     use_unstable_features: bool,
     panic_unwind_support: bool,
-) -> PathBuf {
+) -> (PathBuf, PathBuf) {
     let _group = LogGroup::guard("Build backend");
 
     let mut cmd = CG_CLIF.build(bootstrap_host_compiler, dirs);
 
     let mut rustflags = rustflags_from_env("RUSTFLAGS");
     rustflags.push("-Zallow-features=rustc_private,f16,f128".to_owned());
+    rustflags.push("-Clink-arg=-Wl,-rpath=$ORIGIN/../lib".to_owned());
     rustflags_to_cmd_env(&mut cmd, "RUSTFLAGS", &rustflags);
 
     // Use incr comp despite release mode unless incremental builds are explicitly disabled
@@ -48,9 +49,13 @@ pub(crate) fn build_backend(
     eprintln!("[BUILD] rustc_codegen_cranelift");
     crate::utils::spawn_and_wait(cmd);
 
-    CG_CLIF
-        .target_dir(dirs)
-        .join(&bootstrap_host_compiler.target)
-        .join("release")
-        .join(get_file_name(&bootstrap_host_compiler.rustc, "rustc_codegen_cranelift", "dylib"))
+    let backend_path =
+        CG_CLIF.target_dir(dirs).join(&bootstrap_host_compiler.target).join("release").join(
+            get_file_name(&bootstrap_host_compiler.rustc, "rustc_codegen_cranelift", "dylib"),
+        );
+    let daemon_path =
+        CG_CLIF.target_dir(dirs).join(&bootstrap_host_compiler.target).join("release").join(
+            get_file_name(&bootstrap_host_compiler.rustc, "rustc_daemon", "bin").replace("_", "-"),
+        );
+    (backend_path, daemon_path)
 }

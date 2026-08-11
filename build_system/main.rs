@@ -45,7 +45,7 @@ enum Command {
 
 #[derive(Clone, Debug)]
 enum CodegenBackend {
-    Local(PathBuf),
+    Local((PathBuf, PathBuf)),
     Builtin(String),
 }
 
