@@ -23,6 +23,7 @@ libloading = { version = "0.9.0", optional = true }
 smallvec = "1.8.1"
 
 # Dependencies for the rustc_wrapper for caching
+libc = "0.2.189"
 daemonix = "0.1.0"
 tempfile = "3.27.0"
 serde = { version = "1.0", features = ["derive"] }
