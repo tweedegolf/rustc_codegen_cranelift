@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 struct CompileTask {
     args: Vec<String>,
     env: Vec<(String, String)>,
+    working_directory: PathBuf,
 }
 
 pub fn main() -> ExitCode {
@@ -50,8 +51,9 @@ fn invoke_daemon() -> ExitCode {
         HandledOptions::None => ExitCode::SUCCESS,
         HandledOptions::Normal(matches) if !matches.opt_present("print") => {
             let env: Vec<_> = env::vars().collect();
+            let working_directory = env::current_dir().expect("Unable to get current directory");
 
-            let task = CompileTask { args, env };
+            let task = CompileTask { args, env, working_directory };
 
             let socket_path = socket_path();
             let mut retrying = false;
@@ -107,8 +109,9 @@ fn start_daemon() {
     socket.read_to_end(&mut status).expect("Unable to read startup status");
 }
 
-struct ErrorCapturingCallbacks {
+struct DaemonCallbacks {
     output_stream: Option<UnixStream>,
+    working_directory: PathBuf,
 }
 
 fn run_daemon() -> ExitCode {
@@ -133,24 +136,39 @@ fn run_daemon() -> ExitCode {
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                if let Ok(request) = serde_json::from_reader::<_, CompileTask>(&mut stream) {
-                    catch_with_exit_code(|| {
-                        run_compiler(
-                            &request.args,
-                            &mut ErrorCapturingCallbacks { output_stream: Some(stream) },
-                        )
-                    });
-                }
+                std::thread::spawn(move || {
+                    if let Ok(request) = serde_json::from_reader::<_, CompileTask>(&mut stream) {
+                        catch_with_exit_code(|| {
+                            run_compiler(
+                                &request.args,
+                                &mut DaemonCallbacks {
+                                    output_stream: Some(stream),
+                                    working_directory: request.working_directory,
+                                },
+                            )
+                        });
+                    }
+                });
             }
             Err(_) => todo!(),
         }
     }
 }
 
-impl Callbacks for ErrorCapturingCallbacks {
+impl Callbacks for DaemonCallbacks {
     fn config(&mut self, config: &mut rustc_interface::interface::Config) {
         let options = config.opts.clone();
         let output_stream = self.output_stream.take();
+
+        match &mut config.input {
+            config::Input::File(path_buf) => {
+                let mut new_path = self.working_directory.clone();
+                new_path.push(&*path_buf);
+                *path_buf = new_path;
+            }
+            config::Input::Str { .. } => {}
+        }
+
         config.psess_created = Some(Box::new(move |parse_sess| {
             if let Some(stream) = output_stream {
                 parse_sess.dcx().set_emitter(server_emitter(
