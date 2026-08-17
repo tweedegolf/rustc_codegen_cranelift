@@ -111,6 +111,7 @@ fn start_daemon() {
 
 struct DaemonCallbacks {
     output_stream: Option<UnixStream>,
+    env: Vec<(String, String)>,
     working_directory: PathBuf,
 }
 
@@ -143,6 +144,7 @@ fn run_daemon() -> ExitCode {
                                 &request.args,
                                 &mut DaemonCallbacks {
                                     output_stream: Some(stream),
+                                    env: request.env,
                                     working_directory: request.working_directory,
                                 },
                             )
@@ -169,6 +171,10 @@ impl Callbacks for DaemonCallbacks {
                 *path_buf = new_path;
             }
             config::Input::Str { .. } => {}
+        }
+
+        for (key, value) in self.env.drain(..) {
+            config.opts.logical_env.insert(key, value);
         }
 
         config.psess_created = Some(Box::new(move |parse_sess| {
