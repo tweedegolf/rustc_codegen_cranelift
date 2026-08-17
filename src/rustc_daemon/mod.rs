@@ -160,6 +160,8 @@ impl Callbacks for DaemonCallbacks {
         let options = config.opts.clone();
         let output_stream = self.output_stream.take();
 
+        config.make_codegen_backend = Some(Box::new(|_sess| crate::__rustc_codegen_backend()));
+
         match &mut config.input {
             config::Input::File(path_buf) => {
                 let mut new_path = self.working_directory.clone();
