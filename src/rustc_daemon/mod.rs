@@ -172,7 +172,11 @@ fn run_daemon() -> ExitCode {
         }
     }
 
-    daemonix::Daemonize::new().start().expect("Unable to become a daemon");
+    daemonix::Daemonize::new()
+        .stdout(daemonix::Stdio::keep())
+        .stderr(daemonix::Stdio::keep())
+        .start()
+        .expect("Unable to become a daemon");
 
     let socket_path = socket_path();
     let _ = std::fs::remove_file(&socket_path);
