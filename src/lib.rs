@@ -50,6 +50,7 @@ use rustc_target::spec::{Arch, CfgAbi, Env, Os};
 
 pub use crate::config::*;
 use crate::prelude::*;
+use crate::unwind_module::InMemoryCache;
 
 mod abi;
 mod allocator;
@@ -121,6 +122,7 @@ impl<F: Fn() -> String> Drop for PrintOnPanic<F> {
 
 pub struct CraneliftCodegenBackend {
     pub config: OnceCell<BackendConfig>,
+    pub cache: Option<InMemoryCache>,
 }
 
 impl CodegenBackend for CraneliftCodegenBackend {
@@ -228,7 +230,10 @@ impl CodegenBackend for CraneliftCodegenBackend {
             #[cfg(not(feature = "jit"))]
             tcx.dcx().fatal("jit support was disabled when compiling rustc_codegen_cranelift");
         } else {
-            Box::new(rustc_codegen_ssa::base::codegen_crate(driver::aot::AotDriver, tcx))
+            Box::new(rustc_codegen_ssa::base::codegen_crate(
+                driver::aot::AotDriver(self.cache.clone()),
+                tcx,
+            ))
         }
     }
 
@@ -380,5 +385,5 @@ fn build_isa(sess: &Session, jit: bool) -> Arc<dyn TargetIsa + 'static> {
 /// This is the entrypoint for a hot plugged rustc_codegen_cranelift
 #[unsafe(no_mangle)]
 pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
-    Box::new(CraneliftCodegenBackend { config: OnceCell::new() })
+    Box::new(CraneliftCodegenBackend { config: OnceCell::new(), cache: None })
 }

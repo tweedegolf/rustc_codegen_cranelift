@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use cranelift_codegen::Context;
 use cranelift_codegen::control::ControlPlane;
 use cranelift_codegen::incremental_cache::CacheKvStore;
@@ -8,6 +11,7 @@ use cranelift_module::{
     ModuleReloc, ModuleResult,
 };
 use cranelift_object::{ObjectModule, ObjectProduct};
+use rustc_data_structures::sync::RwLock;
 
 use crate::UnwindContext;
 
@@ -15,12 +19,13 @@ use crate::UnwindContext;
 pub(crate) struct UnwindModule<T> {
     pub(crate) module: T,
     unwind_context: UnwindContext,
+    cache: Option<InMemoryCache>,
 }
 
 impl<T: Module> UnwindModule<T> {
-    pub(crate) fn new(mut module: T, pic_eh_frame: bool) -> Self {
+    pub(crate) fn new(mut module: T, pic_eh_frame: bool, cache: Option<InMemoryCache>) -> Self {
         let unwind_context = UnwindContext::new(&mut module, pic_eh_frame);
-        UnwindModule { module, unwind_context }
+        UnwindModule { module, unwind_context, cache }
     }
 }
 
@@ -91,13 +96,13 @@ impl<T: Module> Module for UnwindModule<T> {
         ctx: &mut Context,
         ctrl_plane: &mut ControlPlane,
     ) -> ModuleResult<()> {
-        if std::env::var("CG_CLIF_FUNCTION_CACHE").as_deref() == Ok("naive") {
+        if let Some(cache) = &mut self.cache {
             if ctx.func.layout.blocks().nth(1).is_none()
                 || ctx.func.layout.blocks().nth(2).is_none()
             {
                 ctx.compile(self.module.isa(), ctrl_plane)?;
             } else {
-                ctx.compile_with_cache(self.module.isa(), &mut Cache, ctrl_plane)?;
+                ctx.compile_with_cache(self.module.isa(), cache, ctrl_plane)?;
             }
         } else {
             ctx.compile(self.module.isa(), ctrl_plane)?;
@@ -132,28 +137,15 @@ impl<T: Module> Module for UnwindModule<T> {
     }
 }
 
-struct Cache;
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InMemoryCache(Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>);
 
-impl Cache {
-    fn file_for_key(&self, key: &[u8]) -> String {
-        let mut path = key.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-        path.push_str(".clif_cache");
-        "/home/bjorn/Projects/cg_clif/cache/".to_owned() + &path
-    }
-}
-
-impl CacheKvStore for Cache {
+impl CacheKvStore for InMemoryCache {
     fn get(&self, key: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
-        let path = self.file_for_key(key);
-        if std::fs::exists(&path).unwrap() {
-            Some(std::fs::read(path).unwrap().into())
-        } else {
-            None
-        }
+        self.0.read().get(key).cloned().map(std::borrow::Cow::from)
     }
 
     fn insert(&mut self, key: &[u8], val: Vec<u8>) {
-        let path = self.file_for_key(key);
-        std::fs::write(path, val).unwrap();
+        self.0.write().insert(key.to_owned(), val);
     }
 }

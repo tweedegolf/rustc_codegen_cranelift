@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::fs::OpenOptions;
 use std::hash::Hash;
 use std::io::{Read, Write};
@@ -24,6 +25,9 @@ use rustc_session::config::ErrorOutputType;
 use rustc_session::{EarlyDiagCtxt, config};
 use rustc_span::source_map::SourceMap;
 use serde::{Deserialize, Serialize};
+
+use crate::CraneliftCodegenBackend;
+use crate::unwind_module::InMemoryCache;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 struct CompileTask {
@@ -137,6 +141,7 @@ struct DaemonCallbacks {
     output_stream: Arc<RwLock<UnixStream>>,
     env: Vec<(String, String)>,
     working_directory: PathBuf,
+    cache: InMemoryCache,
 }
 
 // Implementation originally from sccache.
@@ -246,10 +251,13 @@ fn run_daemon() -> ExitCode {
         return ExitCode::SUCCESS;
     };
 
+    let cache = InMemoryCache::default();
+
     loop {
         let token = jobserver::client().acquire().expect("Unable to acquire jobserver token");
         match listener.accept() {
             Ok((mut stream, _)) => {
+                let cache = cache.clone();
                 std::thread::spawn(move || {
                     if let Ok(request) = serde_json::from_reader::<_, CompileTask>(&mut stream) {
                         let stream = Arc::new(RwLock::new(stream));
@@ -260,6 +268,7 @@ fn run_daemon() -> ExitCode {
                                     output_stream: stream.clone(),
                                     env: request.env.clone(),
                                     working_directory: request.working_directory.clone(),
+                                    cache,
                                 },
                             )
                         }) != ExitCode::SUCCESS
@@ -288,7 +297,11 @@ impl Callbacks for DaemonCallbacks {
         let options = config.opts.clone();
         let output_stream = self.output_stream.clone();
 
-        config.make_codegen_backend = Some(Box::new(|_sess| crate::__rustc_codegen_backend()));
+        let cache = self.cache.clone();
+
+        config.make_codegen_backend = Some(Box::new(|_sess| {
+            Box::new(CraneliftCodegenBackend { config: OnceCell::new(), cache: Some(cache) })
+        }));
 
         match &mut config.input {
             config::Input::File(path_buf) => {

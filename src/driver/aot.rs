@@ -30,7 +30,7 @@ use crate::base::CodegenedFunction;
 use crate::debuginfo::TypeDebugContext;
 use crate::global_asm::{GlobalAsmConfig, GlobalAsmContext};
 use crate::prelude::*;
-use crate::unwind_module::UnwindModule;
+use crate::unwind_module::{InMemoryCache, UnwindModule};
 
 pub(crate) struct AotModule {
     producer: String,
@@ -41,7 +41,7 @@ pub(crate) struct AotModule {
     global_asm: String,
 }
 
-fn make_module(tcx: TyCtxt<'_>, cgu_name: &str) -> AotModule {
+fn make_module(tcx: TyCtxt<'_>, cgu_name: &str, cache: Option<InMemoryCache>) -> AotModule {
     let isa = crate::build_isa(tcx.sess, false);
 
     let mut builder = ObjectBuilder::new(
@@ -62,7 +62,7 @@ fn make_module(tcx: TyCtxt<'_>, cgu_name: &str) -> AotModule {
         tcx.sess.opts.unstable_opts.function_sections.unwrap_or(default_function_sections),
     );
 
-    let module = UnwindModule::new(ObjectModule::new(builder), true);
+    let module = UnwindModule::new(ObjectModule::new(builder), true, cache);
 
     let producer = crate::debuginfo::producer(tcx.sess);
     let global_asm_config = GlobalAsmConfig::new(tcx.sess);
@@ -144,13 +144,13 @@ fn emit_module(
     })
 }
 
-fn codegen_cgu(tcx: TyCtxt<'_>, cgu_name: Symbol) -> AotModule {
+fn codegen_cgu(tcx: TyCtxt<'_>, cgu_name: Symbol, cache: Option<InMemoryCache>) -> AotModule {
     let _timer = tcx.prof.generic_activity_with_arg("codegen cgu", cgu_name.as_str());
 
     let cgu = tcx.codegen_unit(cgu_name);
     let mono_items = cgu.items_in_deterministic_order(tcx);
 
-    let mut module = make_module(tcx, cgu_name.as_str());
+    let mut module = make_module(tcx, cgu_name.as_str(), cache);
     let mut type_dbg = TypeDebugContext::default();
     super::predefine_mono_items(tcx, &mut module.module, &mono_items);
     for (mono_item, item_data) in mono_items {
@@ -263,8 +263,8 @@ fn compile_cgu(
     })
 }
 
-#[derive(Copy, Clone)]
-pub(crate) struct AotDriver;
+#[derive(Clone)]
+pub(crate) struct AotDriver(pub Option<InMemoryCache>);
 
 impl ExtraBackendMethods for AotDriver {
     type Module = AotModule;
@@ -275,7 +275,7 @@ impl ExtraBackendMethods for AotDriver {
         module_name: &str,
         methods: &[AllocatorMethod],
     ) -> Self::Module {
-        let mut allocator_module = make_module(tcx, module_name);
+        let mut allocator_module = make_module(tcx, module_name, self.0.clone());
         crate::allocator::codegen(tcx, &mut allocator_module.module, methods);
         allocator_module
     }
@@ -292,7 +292,7 @@ impl ExtraBackendMethods for AotDriver {
             dep_node,
             tcx,
             || {
-                let aot_module = codegen_cgu(tcx, cgu_name);
+                let aot_module = codegen_cgu(tcx, cgu_name, self.0.clone());
                 ModuleCodegen::new_regular(cgu_name.as_str().to_owned(), aot_module)
             },
             Some(rustc_middle::dep_graph::hash_result),
