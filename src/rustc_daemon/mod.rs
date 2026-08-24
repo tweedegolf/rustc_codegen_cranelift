@@ -1,5 +1,5 @@
 use std::fs::OpenOptions;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hash;
 use std::io::{Read, Write};
 use std::num::NonZeroUsize;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -52,33 +52,20 @@ fn invoke_daemon() -> ExitCode {
 
     let task = CompileTask { args: args.clone(), env, working_directory };
 
-    let mut h = DefaultHasher::new();
-    task.hash(&mut h);
-    let hash = h.finish();
-
-    eprintln!("I: Start ({hash}) as PID {}", std::process::id());
-
     let at_args = args.get(1..).unwrap_or_default();
 
     let early_args = args::arg_expand_all(&early_dcx, at_args);
 
     match handle_options(&early_dcx, &early_args) {
-        HandledOptions::None => {
-            eprintln!("I: Finished in handle options ({hash})");
-            ExitCode::SUCCESS
-        }
+        HandledOptions::None => ExitCode::SUCCESS,
         HandledOptions::Normal(matches) if !matches.opt_present("print") => {
-            eprintln!("I: Connecting ({hash})");
-
             let socket_path = socket_path();
             let mut retrying = false;
             let mut session = loop {
                 match UnixStream::connect(&socket_path) {
                     Ok(session) => break session,
-                    Err(error) => {
-                        eprintln!("I: Could not connect initially ({hash}): {error}");
+                    Err(_) => {
                         if retrying {
-                            eprintln!("I: Cannot connect to daemon ({hash}): {error}");
                             return ExitCode::FAILURE;
                         } else {
                             retrying = true;
@@ -88,33 +75,25 @@ fn invoke_daemon() -> ExitCode {
                 }
             };
 
-            eprintln!("I: Starting request ({hash})");
             serde_json::to_writer(&mut session, &task).expect("Unable to send task to daemon");
             session
                 .shutdown(std::net::Shutdown::Write)
                 .expect("Could not shutdown write connection");
-            eprintln!("I: Sent request ({hash})");
-
-            let e = std::io::copy(&mut session, &mut std::io::stderr());
-
-            eprintln!("I: End of request ({hash}): {e:?}");
+            let _ = std::io::copy(&mut session, &mut std::io::stderr());
 
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("I: Handle internally ({hash})");
             init_rustc_env_logger(&early_dcx);
             install_ice_hook(DEFAULT_BUG_REPORT_URL, |_| ());
 
             catch_with_exit_code(|| run_compiler(&args, &mut NoopCallbacks));
-            eprintln!("I: Finished internally ({hash})");
             ExitCode::SUCCESS
         }
     }
 }
 
 fn start_daemon() {
-    eprintln!("Started daemon");
     let directory =
         tempfile::tempdir().expect("Unable to get temporary directory for notification socket");
     let mut notify_path = directory.path().to_owned();
@@ -130,7 +109,6 @@ fn start_daemon() {
     let (mut socket, _) = listener.accept().expect("Unable to head start of daemon");
     let mut status = vec![];
     socket.read_to_end(&mut status).expect("Unable to read startup status");
-    eprintln!("Received startup notification: {status:?}");
 }
 
 struct DaemonCallbacks {
@@ -174,8 +152,6 @@ pub unsafe fn discard_inherited_jobserver() {
 }
 
 fn run_daemon() -> ExitCode {
-    eprintln!("D: Starting as PID {}", std::process::id());
-
     // We need to discard the parent's job server otherwise we could keep it around for unrelated compilation sessions.
     // Safe because nothing is going on yet.
     unsafe {
@@ -196,11 +172,7 @@ fn run_daemon() -> ExitCode {
         }
     }
 
-    daemonix::Daemonize::new()
-        .stdout(daemonix::Stdio::keep())
-        .stderr(daemonix::Stdio::keep())
-        .start()
-        .expect("Unable to become a daemon");
+    daemonix::Daemonize::new().start().expect("Unable to become a daemon");
 
     let socket_path = socket_path();
     let lock_path = lock_path();
@@ -236,12 +208,9 @@ fn run_daemon() -> ExitCode {
     if let Ok(path) = env::var("__CG_CLIF_DAEMON_NOTIFY") {
         let mut notify = UnixStream::connect(path).expect("Unable to notify startup");
         notify.write_all(b"Started").expect("Unable to notify startup");
-
-        eprintln!("Notified startup");
     }
 
     let Ok(listener) = listener else {
-        eprintln!("Already running");
         return ExitCode::SUCCESS;
     };
 
@@ -250,14 +219,7 @@ fn run_daemon() -> ExitCode {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 std::thread::spawn(move || {
-                    let mut hash = 0;
-
-                    eprintln!("D: Received connection ({hash})");
                     if let Ok(request) = serde_json::from_reader::<_, CompileTask>(&mut stream) {
-                        let mut h = DefaultHasher::new();
-                        request.hash(&mut h);
-                        hash = h.finish();
-                        eprintln!("D: Request ({hash})");
                         catch_with_exit_code(|| {
                             run_compiler(
                                 &request.args,
@@ -268,10 +230,7 @@ fn run_daemon() -> ExitCode {
                                 },
                             )
                         });
-                    } else {
-                        eprintln!("D: Error receiving request ({hash})");
                     }
-                    eprintln!("D: Job done ({hash})");
                     // Explicit token to keep track that we are running a job.
                     drop(token);
                 });
