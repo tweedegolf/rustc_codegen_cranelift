@@ -1,8 +1,8 @@
 //! Unwind info generation (`.eh_frame`)
 
-use cranelift_codegen::FinalizedMachExceptionHandler;
 use cranelift_codegen::ir::Endianness;
 use cranelift_codegen::isa::unwind::UnwindInfo;
+use cranelift_codegen::{CompiledCode, FinalizedMachExceptionHandler};
 use cranelift_module::DataId;
 use cranelift_object::ObjectProduct;
 use gimli::write::{Address, CieId, EhFrame, FrameTable, Section};
@@ -118,7 +118,7 @@ impl UnwindContext {
         &mut self,
         module: &mut dyn Module,
         func_id: FuncId,
-        context: &Context,
+        compiled_code: &CompiledCode,
     ) {
         let triple = module.isa().triple();
         if matches!(triple.operating_system, target_lexicon::OperatingSystem::MacOSX { .. })
@@ -129,9 +129,7 @@ impl UnwindContext {
             return;
         }
 
-        let Some(unwind_info) =
-            context.compiled_code().unwrap().create_unwind_info(module.isa()).unwrap()
-        else {
+        let Some(unwind_info) = compiled_code.create_unwind_info(module.isa()).unwrap() else {
             return;
         };
 
@@ -161,7 +159,7 @@ impl UnwindContext {
                         .actions
                         .add(Action { kind: ActionKind::Catch(catch_type), next_action: None });
 
-                    for call_site in context.compiled_code().unwrap().buffer.call_sites() {
+                    for call_site in compiled_code.buffer.call_sites() {
                         if call_site.exception_handlers.is_empty() {
                             gcc_except_table_data.call_sites.0.push(CallSite {
                                 start: u64::from(call_site.ret_addr - 1),

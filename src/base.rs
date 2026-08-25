@@ -247,13 +247,13 @@ pub(crate) fn compile_fn(
 
     // Define debuginfo for function
     prof.generic_activity("generate debug info").run(|| {
-        if let Some(debug_context) = debug_context {
-            codegened_func.func_debug_cx.unwrap().finalize(
-                debug_context,
-                codegened_func.func_id,
-                context,
-            );
-        }
+        // if let Some(debug_context) = debug_context {
+        //     codegened_func.func_debug_cx.unwrap().finalize(
+        //         debug_context,
+        //         codegened_func.func_id,
+        //         compiled_code,
+        //     );
+        // }
     });
 }
 

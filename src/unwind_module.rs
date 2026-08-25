@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cranelift_codegen::Context;
 use cranelift_codegen::control::ControlPlane;
-use cranelift_codegen::incremental_cache::CacheKvStore;
+use cranelift_codegen::incremental_cache::CacheKeyHash;
 use cranelift_codegen::ir::Signature;
 use cranelift_codegen::isa::{TargetFrontendConfig, TargetIsa};
+use cranelift_codegen::{CompiledCode, CompiledCodeStencil, Context};
 use cranelift_module::{
     DataDescription, DataId, FuncId, FuncOrDataId, Linkage, Module, ModuleDeclarations,
     ModuleReloc, ModuleResult,
 };
 use cranelift_object::{ObjectModule, ObjectProduct};
-use rustc_data_structures::sync::RwLock;
+use rustc_data_structures::sync::{IntoDynSyncSend, RwLock};
 
 use crate::UnwindContext;
 
@@ -96,18 +96,21 @@ impl<T: Module> Module for UnwindModule<T> {
         ctx: &mut Context,
         ctrl_plane: &mut ControlPlane,
     ) -> ModuleResult<()> {
-        if let Some(cache) = &mut self.cache {
+        let res;
+        let res = if let Some(cache) = &mut self.cache {
             if ctx.func.layout.blocks().nth(1).is_none()
                 || ctx.func.layout.blocks().nth(2).is_none()
             {
                 ctx.compile(self.module.isa(), ctrl_plane)?;
+                ctx.compiled_code().unwrap()
             } else {
-                ctx.compile_with_cache(self.module.isa(), cache, ctrl_plane)?;
+                res = compile_with_cache(&mut self.module, ctx, ctrl_plane, cache)?;
+                &res
             }
         } else {
             ctx.compile(self.module.isa(), ctrl_plane)?;
-        }
-        let res = ctx.compiled_code().unwrap();
+            ctx.compiled_code().unwrap()
+        };
 
         let alignment = res.buffer.alignment as u64;
         let relocs = res
@@ -118,7 +121,7 @@ impl<T: Module> Module for UnwindModule<T> {
             .collect::<Vec<_>>();
         self.module.define_function_bytes(func, alignment, res.buffer.data(), &relocs)?;
 
-        self.unwind_context.add_function(&mut self.module, func, ctx);
+        self.unwind_context.add_function(&mut self.module, func, res);
         Ok(())
     }
 
@@ -137,15 +140,45 @@ impl<T: Module> Module for UnwindModule<T> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct InMemoryCache(Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>);
+#[inline(never)]
+fn compile_with_cache(
+    module: &mut impl Module,
+    ctx: &mut Context,
+    ctrl_plane: &mut ControlPlane,
+    cache: &mut InMemoryCache,
+) -> Result<CompiledCode, cranelift_module::ModuleError> {
+    let isa: &dyn TargetIsa = module.isa();
+    let cache_key_hash = {
+        let _tt = cranelift_codegen::timing::try_incremental_cache();
 
-impl CacheKvStore for InMemoryCache {
-    fn get(&self, key: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
-        self.0.read().get(key).cloned().map(std::borrow::Cow::from)
+        let cache_key_hash =
+            cranelift_codegen::incremental_cache::compute_cache_key(isa, &ctx.func);
+
+        if let Some(stencil) = cache.get(&cache_key_hash) {
+            return Ok(stencil.apply_params(&ctx.func.params));
+        }
+
+        cache_key_hash
+    };
+    let stencil = ctx
+        .compile_stencil(isa, ctrl_plane)
+        .map_err(|err| cranelift_codegen::CompileError { inner: err, func: &ctx.func })?;
+    {
+        let _tt = cranelift_codegen::timing::store_incremental_cache();
+        cache.insert(cache_key_hash, stencil.clone());
+    };
+    Ok(stencil.apply_params(&ctx.func.params))
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryCache(Arc<RwLock<HashMap<CacheKeyHash, IntoDynSyncSend<CompiledCodeStencil>>>>);
+
+impl InMemoryCache {
+    fn get(&self, key: &CacheKeyHash) -> Option<CompiledCodeStencil> {
+        self.0.read().get(key).cloned().map(|val| val.0)
     }
 
-    fn insert(&mut self, key: &[u8], val: Vec<u8>) {
-        self.0.write().insert(key.to_owned(), val);
+    fn insert(&mut self, key: CacheKeyHash, val: CompiledCodeStencil) {
+        self.0.write().insert(key, IntoDynSyncSend(val));
     }
 }
