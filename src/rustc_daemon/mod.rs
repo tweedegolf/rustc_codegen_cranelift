@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::{env, io};
 
 use anstream::AutoStream;
+use postcard::Deserializer;
 use rustc_data_structures::jobserver;
+use rustc_data_structures::sync::RwLock;
 use rustc_driver::{
     Callbacks, DEFAULT_BUG_REPORT_URL, HandledOptions, args, catch_with_exit_code, handle_options,
     init_rustc_env_logger, install_ice_hook, run_compiler,
@@ -58,7 +60,9 @@ fn invoke_daemon() -> ExitCode {
 
     match handle_options(&early_dcx, &early_args) {
         HandledOptions::None => ExitCode::SUCCESS,
-        HandledOptions::Normal(matches) if !matches.opt_present("print") => {
+        HandledOptions::Normal(matches)
+            if !matches.opt_present("print") && !matches.free.contains(&"-".to_string()) =>
+        {
             let socket_path = socket_path();
             let mut retrying = false;
             let mut session = loop {
@@ -75,13 +79,31 @@ fn invoke_daemon() -> ExitCode {
                 }
             };
 
-            serde_json::to_writer(&mut session, &task).expect("Unable to send task to daemon");
+            serde_json::to_writer(&mut session, &task)
+                .map_err(|e| {
+                    eprintln!("task: {:?}", task);
+                    e
+                })
+                .expect("Unable to send task to daemon");
             session
                 .shutdown(std::net::Shutdown::Write)
                 .expect("Could not shutdown write connection");
-            let _ = std::io::copy(&mut session, &mut std::io::stderr());
 
-            ExitCode::SUCCESS
+            let mut buffer = [0u8; 4096];
+            let reader = postcard::de_flavors::io::io::IOReader::new(&mut session, &mut buffer);
+            let mut deserializer = Deserializer::from_flavor(reader);
+
+            while let Ok(message) = JsonStreamMessage::deserialize(&mut deserializer) {
+                match message {
+                    JsonStreamMessage::ExitSucces => return ExitCode::SUCCESS,
+                    JsonStreamMessage::ExitFailure => return ExitCode::FAILURE,
+                    JsonStreamMessage::OutputBytes(items) => {
+                        std::io::stderr().write_all(&items).ok();
+                    }
+                }
+            }
+
+            ExitCode::FAILURE
         }
         _ => {
             init_rustc_env_logger(&early_dcx);
@@ -112,7 +134,7 @@ fn start_daemon() {
 }
 
 struct DaemonCallbacks {
-    output_stream: Option<UnixStream>,
+    output_stream: Arc<RwLock<UnixStream>>,
     env: Vec<(String, String)>,
     working_directory: PathBuf,
 }
@@ -172,7 +194,17 @@ fn run_daemon() -> ExitCode {
         }
     }
 
-    daemonix::Daemonize::new().start().expect("Unable to become a daemon");
+    let log_file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log_path())
+        .expect("Unable to open log file");
+
+    daemonix::Daemonize::new()
+        .stdout(log_file.try_clone().expect("unable to reopen log file"))
+        .stderr(log_file)
+        .start()
+        .expect("Unable to become a daemon");
 
     let socket_path = socket_path();
     let lock_path = lock_path();
@@ -220,16 +252,27 @@ fn run_daemon() -> ExitCode {
             Ok((mut stream, _)) => {
                 std::thread::spawn(move || {
                     if let Ok(request) = serde_json::from_reader::<_, CompileTask>(&mut stream) {
-                        catch_with_exit_code(|| {
+                        let stream = Arc::new(RwLock::new(stream));
+                        if catch_with_exit_code(|| {
                             run_compiler(
                                 &request.args,
                                 &mut DaemonCallbacks {
-                                    output_stream: Some(stream),
-                                    env: request.env,
-                                    working_directory: request.working_directory,
+                                    output_stream: stream.clone(),
+                                    env: request.env.clone(),
+                                    working_directory: request.working_directory.clone(),
                                 },
                             )
-                        });
+                        }) != ExitCode::SUCCESS
+                        {
+                            eprintln!("task failed: {:?}", request);
+                            let mut writer = stream.write();
+                            postcard::to_io(&JsonStreamMessage::ExitFailure, &mut *writer).ok();
+                        } else {
+                            let mut writer = stream.write();
+                            postcard::to_io(&JsonStreamMessage::ExitSucces, &mut *writer).ok();
+                        }
+                    } else {
+                        postcard::to_io(&JsonStreamMessage::ExitFailure, &mut stream).ok();
                     }
                     // Explicit token to keep track that we are running a job.
                     drop(token);
@@ -243,7 +286,7 @@ fn run_daemon() -> ExitCode {
 impl Callbacks for DaemonCallbacks {
     fn config(&mut self, config: &mut rustc_interface::interface::Config) {
         let options = config.opts.clone();
-        let output_stream = self.output_stream.take();
+        let output_stream = self.output_stream.clone();
 
         config.make_codegen_backend = Some(Box::new(|_sess| crate::__rustc_codegen_backend()));
 
@@ -261,19 +304,52 @@ impl Callbacks for DaemonCallbacks {
         }
 
         config.psess_created = Some(Box::new(move |parse_sess| {
-            if let Some(stream) = output_stream {
-                parse_sess.dcx().set_emitter(server_emitter(
-                    stream,
-                    &options,
-                    parse_sess.clone_source_map(),
-                ));
-            }
+            parse_sess.dcx().set_emitter(server_emitter(
+                output_stream,
+                &options,
+                parse_sess.clone_source_map(),
+            ));
         }));
     }
 }
 
+#[derive(Deserialize, Serialize)]
+enum JsonStreamMessage {
+    ExitSucces,
+    ExitFailure,
+    OutputBytes(Vec<u8>),
+}
+
+struct JsonStreamSender {
+    inner: Arc<RwLock<UnixStream>>,
+}
+
+impl JsonStreamSender {
+    fn new(inner: Arc<RwLock<UnixStream>>) -> Box<Self> {
+        Box::new(JsonStreamSender { inner })
+    }
+}
+
+impl Write for JsonStreamSender {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut writer = self.inner.write();
+
+        postcard::to_io(&JsonStreamMessage::OutputBytes(buf.into()), &mut *writer)
+            .map_err(std::io::Error::other)?;
+
+        writer.flush()?;
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        /* noop as we flush on each write. */
+        Ok(())
+    }
+}
+
 fn server_emitter(
-    stream: UnixStream,
+    stream: Arc<RwLock<UnixStream>>,
     sopts: &config::Options,
     source_map: Arc<SourceMap>,
 ) -> Box<DynEmitter> {
@@ -296,9 +372,12 @@ fn server_emitter(
     let source_map = if sopts.unstable_opts.link_only { None } else { Some(source_map) };
 
     match sopts.error_format {
-        config::ErrorOutputType::HumanReadable { kind, color_config: _ } => match kind {
-            HumanReadableErrorType { short, unicode } => {
-                let emitter = AnnotateSnippetEmitter::new(AutoStream::always(Box::new(stream)))
+        config::ErrorOutputType::HumanReadable { kind, color_config: _ } => {
+            match kind {
+                HumanReadableErrorType { short, unicode } => {
+                    let emitter = AnnotateSnippetEmitter::new(AutoStream::always(
+                        JsonStreamSender::new(stream),
+                    ))
                     .sm(source_map)
                     .short_message(short)
                     .diagnostic_width(sopts.diagnostic_width)
@@ -309,12 +388,13 @@ fn server_emitter(
                     .ignored_directories_in_source_blocks(
                         sopts.unstable_opts.ignore_directory_in_diagnostics_source_blocks.clone(),
                     );
-                Box::new(emitter.ui_testing(sopts.unstable_opts.ui_testing))
+                    Box::new(emitter.ui_testing(sopts.unstable_opts.ui_testing))
+                }
             }
-        },
+        }
         config::ErrorOutputType::Json { pretty, json_rendered, color_config } => Box::new(
             JsonEmitter::new(
-                Box::new(io::BufWriter::new(stream)),
+                Box::new(io::BufWriter::new(JsonStreamSender::new(stream))),
                 source_map,
                 pretty,
                 json_rendered,
@@ -346,4 +426,12 @@ fn lock_path() -> PathBuf {
     lock_path.push("cg_clif_daemon_lock");
 
     lock_path
+}
+
+fn log_path() -> PathBuf {
+    let mut log_path: PathBuf =
+        env::var_os("XDG_RUNTIME_DIR").expect("Missing runtime directory").into();
+    log_path.push("cg_clif_daemon_log");
+
+    log_path
 }
