@@ -134,22 +134,26 @@ impl<T: Module> Module for UnwindModule<T> {
 
 #[cfg(feature = "jit")]
 impl UnwindModule<cranelift_jit::JITModule> {
-    pub(crate) fn finalize_definitions(mut self) -> cranelift_jit::JITModule {
+    pub(crate) fn finalize_definitions_ref(&mut self, eh_personality: &str, pic_eh_frame: bool) {
         use std::mem;
 
         self.module.finalize_definitions().unwrap();
-        unsafe { self.unwind_context.register_jit(&self.module) };
+        let unwind_context = mem::replace(
+            &mut self.unwind_context,
+            UnwindContext::new(&mut self.module, eh_personality, pic_eh_frame),
+        );
+        unsafe { unwind_context.register_jit(&self.module) };
 
         if self.jit_debug_symbols {
             let symbols = std::iter::chain(
-                self.functions.into_iter().map(|(func_id, size)| {
+                self.functions.drain(..).map(|(func_id, size)| {
                     let name =
                         self.module.declarations().get_function_decl(func_id).linkage_name(func_id);
                     let addr =
                         self.module.get_finalized_function(func_id).expose_provenance() as u64;
                     (name, addr, size as u64, object::elf::STT_FUNC)
                 }),
-                self.data_objects.into_iter().map(|data_id| {
+                self.data_objects.drain(..).map(|data_id| {
                     let name =
                         self.module.declarations().get_data_decl(data_id).linkage_name(data_id);
                     let (addr, size) = self.module.get_finalized_data(data_id);
@@ -159,8 +163,6 @@ impl UnwindModule<cranelift_jit::JITModule> {
             .collect::<Vec<_>>();
             mem::forget(gdbjit_register_syms(&symbols));
         }
-
-        self.module
     }
 }
 
