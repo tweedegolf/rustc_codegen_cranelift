@@ -53,6 +53,18 @@ index e676a38..b6a9a3c 100644
  atomic_int! {
      target_has_atomic_load_store = "128",
      target_has_atomic = "128",
+diff --git a/library/std/src/sys/args/unix.rs b/library/std/src/sys/args/unix.rs
+index 197931d..09cd854 100644
+--- a/library/std/src/sys/args/unix.rs
++++ b/library/std/src/sys/args/unix.rs
+@@ -117,6 +117,7 @@ mod imp {
+     /// glibc passes argc, argv, and envp to functions in .init_array, as a non-standard extension.
+     /// This allows `std::env::args` to work even in a `cdylib`, as it does on macOS and Windows.
+     #[cfg(all(target_os = "linux", target_env = "gnu"))]
++    #[cfg(false)]
+     #[used]
+     #[unsafe(link_section = ".init_array.00099")]
+     static ARGV_INIT_ARRAY: extern "C" fn(
 -- 
 2.48.1
 

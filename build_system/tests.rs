@@ -128,9 +128,19 @@ const BASE_SYSROOT_SUITE: &[TestCase] = &[
         // The standard library may have been compiled with -Zrandomize-layout.
         target_compiler.rustflags.extend(["--cfg".to_owned(), "randomized_layouts".to_owned()]);
 
+        target_compiler.rustflags.extend([
+            "-Cllvm-args=jit-mode".to_owned(),
+            "-Cllvm-args=jit-lazy".to_owned(),
+            "-Cprefer-dynamic".to_owned(),
+        ]);
+
+        target_compiler
+            .rustflags
+            .extend(["-Zself-profile=/home/bjorn/Projects/cg_clif/prof".to_owned()]);
+
         if runner.is_native {
             let mut test_cmd = SYSROOT_TESTS.test(&target_compiler, &runner.dirs);
-            test_cmd.args(["-p", "coretests", "-p", "alloctests", "--tests", "--", "-q"]);
+            test_cmd.args(["-p", "alloctests", "--tests", "-j1", "--", "-q"]);
             spawn_and_wait(test_cmd);
         } else {
             eprintln!("Cross-Compiling: Not running tests");
