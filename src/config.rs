@@ -6,6 +6,11 @@ pub struct BackendConfig {
     /// Defaults to AOT compilation. Can be set using `-Cllvm-args=jit-mode`.
     pub jit_mode: bool,
 
+    /// When JIT executing should the lazy JIT mode be used.
+    ///
+    /// Defaults to false. Can be set using `-Cllvm-args=jit-lazy`.
+    pub lazy_jit: bool,
+
     /// When JIT mode is enable pass these arguments to the program.
     ///
     /// Defaults to the value of `CG_CLIF_JIT_ARGS`.
@@ -17,6 +22,7 @@ impl BackendConfig {
     pub fn from_opts(opts: &[String]) -> Result<Self, String> {
         let mut config = BackendConfig {
             jit_mode: false,
+            lazy_jit: false,
             jit_args: match std::env::var("CG_CLIF_JIT_ARGS") {
                 Ok(args) => args.split(' ').map(|arg| arg.to_string()).collect(),
                 Err(std::env::VarError::NotPresent) => vec![],
@@ -34,6 +40,7 @@ impl BackendConfig {
             }
             match &**opt {
                 "jit-mode" => config.jit_mode = true,
+                "jit-lazy" => config.lazy_jit = true,
                 _ => return Err(format!("Unknown option `{}`", opt)),
             }
         }

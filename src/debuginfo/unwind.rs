@@ -3,7 +3,7 @@
 use cranelift_codegen::FinalizedMachExceptionHandler;
 use cranelift_codegen::ir::Endianness;
 use cranelift_codegen::isa::unwind::UnwindInfo;
-use cranelift_module::DataId;
+use cranelift_module::{DataId, ModuleError};
 use cranelift_object::ObjectProduct;
 use gimli::write::{Address, CieId, EhFrame, FrameTable, Section};
 use gimli::{Encoding, Format, RunTimeEndian};
@@ -101,7 +101,10 @@ impl UnwindContext {
                     module.declare_func_in_data(personality, &mut personality_ref_data);
                 personality_ref_data.write_function_addr(0, personality_func_ref);
 
-                module.define_data(personality_ref, &personality_ref_data).unwrap();
+                match module.define_data(personality_ref, &personality_ref_data) {
+                    Ok(()) | Err(ModuleError::DuplicateDefinition(_)) => {}
+                    Err(err) => panic!("{err}"),
+                }
 
                 cie.personality = Some((code_ptr_encoding, address_for_data(personality_ref)));
             }
