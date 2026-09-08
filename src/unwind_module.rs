@@ -35,9 +35,15 @@ impl UnwindModule<ObjectModule> {
 
 #[cfg(feature = "jit")]
 impl UnwindModule<cranelift_jit::JITModule> {
-    pub(crate) fn finalize_definitions(mut self) -> cranelift_jit::JITModule {
+    pub(crate) fn finalize_definitions_ref(&mut self, pic_eh_frame: bool) {
+        use std::mem;
+
         self.module.finalize_definitions().unwrap();
-        unsafe { self.unwind_context.register_jit(&self.module) };
+        let unwind_context = mem::replace(
+            &mut self.unwind_context,
+            UnwindContext::new(&mut self.module, pic_eh_frame),
+        );
+        unsafe { unwind_context.register_jit(&self.module) };
 
         let symbols = std::iter::chain(
             self.functions.drain(..).map(|(func_id, size)| {
@@ -68,8 +74,6 @@ impl UnwindModule<cranelift_jit::JITModule> {
         std::mem::forget(
             wasmtime_internal_jit_debug::gdb_jit_int::GdbJitImageRegistration::register(obj),
         );
-
-        self.module
     }
 }
 
