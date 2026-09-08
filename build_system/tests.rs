@@ -452,6 +452,21 @@ impl<'a> TestRunner<'a> {
                         jit_cmd.env("CG_CLIF_JIT_ARGS", args);
                     }
                     spawn_and_wait(jit_cmd);
+
+                    eprintln!("[JIT-lazy] {testname}");
+                    let mut jit_cmd = self.rustc_command([
+                        "-Zunstable-options",
+                        "-Cllvm-args=jit-mode",
+                        "-Cllvm-args=jit-lazy",
+                        "-Cprefer-dynamic",
+                        source,
+                        "--cfg",
+                        "jit",
+                    ]);
+                    if !args.is_empty() {
+                        jit_cmd.env("CG_CLIF_JIT_ARGS", args);
+                    }
+                    spawn_and_wait(jit_cmd);
                 }
             }
         }

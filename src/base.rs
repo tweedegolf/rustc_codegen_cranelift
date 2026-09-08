@@ -24,8 +24,8 @@ use crate::pretty_clif::{CommentWriter, format_clif_ir_header};
 use crate::{codegen_f16_f128, enable_verifier};
 
 pub(crate) struct CodegenedFunction {
-    symbol_name: String,
-    func_id: FuncId,
+    pub(crate) symbol_name: String,
+    pub(crate) func_id: FuncId,
     func: Function,
     clif_comments: CommentWriter,
     func_debug_cx: Option<FunctionDebugContext>,

@@ -218,9 +218,14 @@ impl CodegenBackend for CraneliftCodegenBackend {
     fn codegen_crate(&self, tcx: TyCtxt<'_>) -> Box<dyn Any> {
         info!("codegen crate {}", tcx.crate_name(LOCAL_CRATE));
         let config = self.config.get().unwrap();
-        if config.jit_mode {
+        if config.jit_mode && tcx.crate_types().contains(&rustc_structures::CrateType::Executable) {
             #[cfg(feature = "jit")]
-            driver::jit::run_jit(tcx, self.target_cpu(tcx.sess), config.jit_args.clone());
+            driver::jit::run_jit(
+                tcx,
+                self.target_cpu(tcx.sess),
+                config.lazy_jit,
+                config.jit_args.clone(),
+            );
 
             #[cfg(not(feature = "jit"))]
             tcx.dcx().fatal("jit support was disabled when compiling rustc_codegen_cranelift");
