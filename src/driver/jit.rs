@@ -262,7 +262,7 @@ fn codegen_and_compile_fn<'tcx>(
     });
 }
 
-extern "C" fn clif_jit_fn(
+extern "C-unwind" fn clif_jit_fn(
     instance_ptr: *const Instance<'static>,
     trampoline_ptr: *const u8,
 ) -> *const u8 {
