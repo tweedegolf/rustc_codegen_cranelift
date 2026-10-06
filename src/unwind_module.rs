@@ -15,12 +15,13 @@ pub(crate) struct UnwindModule<T> {
     pub(crate) module: T,
     unwind_context: UnwindContext,
     funcs: Vec<(FuncId, usize)>,
+    datas: Vec<DataId>,
 }
 
 impl<T: Module> UnwindModule<T> {
     pub(crate) fn new(mut module: T, pic_eh_frame: bool) -> Self {
         let unwind_context = UnwindContext::new(&mut module, pic_eh_frame);
-        UnwindModule { module, unwind_context, funcs: vec![] }
+        UnwindModule { module, unwind_context, funcs: vec![], datas: vec![] }
     }
 }
 
@@ -44,10 +45,8 @@ impl UnwindModule<cranelift_jit::JITModule> {
         );
         unsafe { unwind_context.register_jit(&self.module) };
 
-        let symbols = self
-            .funcs
-            .drain(..)
-            .map(|(func_id, size)| {
+        let symbols = std::iter::chain(
+            self.funcs.drain(..).map(|(func_id, size)| {
                 let name = self
                     .module
                     .declarations()
@@ -56,9 +55,21 @@ impl UnwindModule<cranelift_jit::JITModule> {
                     .as_deref()
                     .unwrap_or("???");
                 let addr = self.module.get_finalized_function(func_id).expose_provenance() as u64;
-                (name, addr, size as u64)
-            })
-            .collect::<Vec<_>>();
+                (name, addr, size as u64, object40::elf::STT_FUNC)
+            }),
+            self.datas.drain(..).map(|data_id| {
+                let name = self
+                    .module
+                    .declarations()
+                    .get_data_decl(data_id)
+                    .name
+                    .as_deref()
+                    .unwrap_or("???");
+                let (addr, size) = self.module.get_finalized_data(data_id);
+                (name, addr.expose_provenance() as u64, size as u64, object40::elf::STT_OBJECT)
+            }),
+        )
+        .collect::<Vec<_>>();
         let obj = objfile_for_sym(&symbols);
         mem::forget(wasmtime_internal_jit_debug::gdb_jit_int::GdbJitImageRegistration::register(
             obj,
@@ -139,11 +150,13 @@ impl<T: Module> Module for UnwindModule<T> {
     }
 
     fn define_data(&mut self, data_id: DataId, data: &DataDescription) -> ModuleResult<()> {
-        self.module.define_data(data_id, data)
+        self.module.define_data(data_id, data)?;
+        self.datas.push(data_id);
+        Ok(())
     }
 }
 
-fn objfile_for_sym(symbols: &[(&str, u64, u64)]) -> Vec<u8> {
+fn objfile_for_sym(symbols: &[(&str, u64, u64, object40::elf::SymbolType)]) -> Vec<u8> {
     use object40::elf::{
         self, ELFOSABI_GNU, EM_X86_64, ET_EXEC, FileFlags, SymbolOther, SymbolSection,
     };
@@ -171,13 +184,13 @@ fn objfile_for_sym(symbols: &[(&str, u64, u64)]) -> Vec<u8> {
 
     // .symtab
     let _symtab_offset = writer.write_null_symbol();
-    for (i, &(name, addr, size)) in symbols.iter().enumerate() {
+    for (i, &(name, addr, size, type_)) in symbols.iter().enumerate() {
         let name_id = writer.add_string(name.as_bytes());
         let section = Some(text_section_index.0 + i as u32);
         writer.write_symbol(&Sym {
             st_name: writer.string_offset(Some(name_id)),
             section,
-            st_info: elf::SymbolInfo::new(elf::STB_LOCAL, elf::STT_FUNC),
+            st_info: elf::SymbolInfo::new(elf::STB_LOCAL, type_),
             st_other: SymbolOther::default(),
             st_shndx: SymbolSection::default(), // FIXME
             st_value: addr,
@@ -192,7 +205,7 @@ fn objfile_for_sym(symbols: &[(&str, u64, u64)]) -> Vec<u8> {
     // .shstrtab
     let text_name_id = symbols
         .iter()
-        .map(|(name, _, _)| {
+        .map(|(name, _, _, _)| {
             writer.add_section_name(Box::leak(format!(".text.{name}").into_boxed_str()).as_bytes())
         })
         .collect::<Vec<_>>();
@@ -200,7 +213,7 @@ fn objfile_for_sym(symbols: &[(&str, u64, u64)]) -> Vec<u8> {
 
     // section header table
     writer.write_null_section_header();
-    for (i, &(_name, addr, size)) in symbols.iter().enumerate() {
+    for (i, &(_name, addr, size, _type)) in symbols.iter().enumerate() {
         let index = writer.write_section_header(&SectionHeader {
             sh_name: writer.section_name_offset(Some(text_name_id[i])),
             sh_type: elf::SHT_NOBITS,
