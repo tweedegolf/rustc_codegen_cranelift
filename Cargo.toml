@@ -14,9 +14,11 @@ cranelift-module = { version = "0.135.0" }
 cranelift-native = { version = "0.135.0" }
 cranelift-jit = { version = "0.135.0", optional = true }
 cranelift-object = { version = "0.135.0", default-features = false }
+wasmtime-internal-jit-debug = { version = "48.0.0", features = ["gdb_jit_int"] }
 target-lexicon = "0.13"
 gimli = { version = "0.33", default-features = false, features = ["write"] }
 object = { version = "0.39.1", default-features = false, features = ["std", "read_core", "write", "archive", "coff", "elf", "macho", "pe"] }
+object40 = { package = "object", version = "0.40.0", default-features = false, features = ["write"] }
 
 indexmap = "2.0.0"
 libloading = { version = "0.9.0", optional = true }

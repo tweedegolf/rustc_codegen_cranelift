@@ -263,7 +263,7 @@ impl UnwindContext {
     pub(crate) unsafe fn register_jit(self, _jit_module: &cranelift_jit::JITModule) {}
 
     #[cfg(all(feature = "jit", not(windows)))]
-    pub(crate) unsafe fn register_jit(self, jit_module: &cranelift_jit::JITModule) {
+    pub(crate) unsafe fn register_jit(&self, jit_module: &cranelift_jit::JITModule) {
         use std::mem::ManuallyDrop;
 
         let mut eh_frame = EhFrame::from(super::emit::WriterRelocate::new(self.endian));
