@@ -289,7 +289,10 @@ fn build_isa(sess: &Session, jit: bool) -> Arc<dyn TargetIsa + 'static> {
         { sess.target.options.frame_pointer }.ratchet(sess.opts.cg.force_frame_pointers);
     let preserve_frame_pointer = frame_ptr != rustc_target::spec::FramePointer::MayOmit;
     flags_builder
-        .set("preserve_frame_pointers", if preserve_frame_pointer { "true" } else { "false" })
+        .set(
+            "preserve_frame_pointers",
+            if preserve_frame_pointer || jit { "true" } else { "false" },
+        )
         .unwrap();
 
     let tls_model = match target_tuple.binary_format {

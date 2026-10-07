@@ -240,7 +240,7 @@ fn codegen_and_compile_fn<'tcx>(
         );
 
         if let Some(func_id) = jit_mode {
-            codegened_func.symbol_name = format!(".jit.{}", codegened_func.symbol_name);
+            codegened_func.symbol_name = format!("{}.jit", codegened_func.symbol_name);
             codegened_func.func_id = func_id;
         }
 
@@ -290,9 +290,8 @@ fn jit_fn(instance_ptr: *const Instance<'static>) -> *const u8 {
                 jit_module.target_config().default_call_conv,
                 instance,
             );
-            let func_id = jit_module
-                .declare_function(&format!(".jit.{name}"), Linkage::Export, &sig)
-                .unwrap();
+            let func_id =
+                jit_module.declare_function(&format!("{name}.jit"), Linkage::Export, &sig).unwrap();
             let got_id = jit_module
                 .declare_data(&format!(".got.{name}"), Linkage::Export, true, false)
                 .unwrap();
@@ -440,17 +439,14 @@ fn codegen_shim<'tcx>(
     trampoline_builder.ins().brif(got_data, direct_block, [], jit_block, []);
 
     trampoline_builder.switch_to_block(direct_block);
-    let call_inst = trampoline_builder.ins().call_indirect(sig_ref, got_data, &fn_args);
-    let ret_vals = trampoline_builder.func.dfg.inst_results(call_inst).to_vec();
-    trampoline_builder.ins().return_(&ret_vals);
+    trampoline_builder.ins().return_call_indirect(sig_ref, got_data, &fn_args);
 
     trampoline_builder.switch_to_block(jit_block);
     let instance_ptr = trampoline_builder.ins().iconst(pointer_type, instance_ptr as u64 as i64);
     let jitted_fn = trampoline_builder.ins().call(jit_fn, &[instance_ptr]);
     let jitted_fn = trampoline_builder.func.dfg.inst_results(jitted_fn)[0];
-    let call_inst = trampoline_builder.ins().call_indirect(sig_ref, jitted_fn, &fn_args);
-    let ret_vals = trampoline_builder.func.dfg.inst_results(call_inst).to_vec();
-    trampoline_builder.ins().return_(&ret_vals);
+    trampoline_builder.ins().return_call_indirect(sig_ref, jitted_fn, &fn_args);
 
+    trampoline_builder.finalize(module.target_config());
     module.define_function(func_id, context).unwrap();
 }
