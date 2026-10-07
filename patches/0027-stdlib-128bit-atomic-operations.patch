@@ -65,6 +65,19 @@ index 197931d..09cd854 100644
      #[used]
      #[unsafe(link_section = ".init_array.00099")]
      static ARGV_INIT_ARRAY: extern "C" fn(
+diff --git a/library/std/src/hash/random.rs b/library/std/src/hash/random.rs
+index b9c21ab..89801b8 100644
+--- a/library/std/src/hash/random.rs
++++ b/library/std/src/hash/random.rs
+@@ -47,7 +47,7 @@ impl RandomState {
+     ///
+     /// let s = RandomState::new();
+     /// ```
+-    #[inline]
++    #[inline(never)]
+     #[allow(deprecated)]
+     // rand
+     #[must_use]
 -- 
 2.48.1
 
