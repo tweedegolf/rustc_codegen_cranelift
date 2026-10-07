@@ -53,6 +53,19 @@ index e676a38..b6a9a3c 100644
  atomic_int! {
      target_has_atomic_load_store = "128",
      target_has_atomic = "128",
+diff --git a/library/std/src/hash/random.rs b/library/std/src/hash/random.rs
+index b9c21ab..89801b8 100644
+--- a/library/std/src/hash/random.rs
++++ b/library/std/src/hash/random.rs
+@@ -47,7 +47,7 @@ impl RandomState {
+     ///
+     /// let s = RandomState::new();
+     /// ```
+-    #[inline]
++    #[inline(never)]
+     #[allow(deprecated)]
+     // rand
+     #[must_use]
 -- 
 2.48.1
 

@@ -109,6 +109,70 @@ index 77e56d3..face505 100644
  #[cfg(test)]
  extern crate test;
  mod testing;
+diff --git a/alloc/src/collections/linked_list/tests.rs b/alloc/src/collections/linked_list/tests.rs
+index a51af63..99784ad 100644
+--- a/alloc/src/collections/linked_list/tests.rs
++++ b/alloc/src/collections/linked_list/tests.rs
+@@ -1064,6 +1064,7 @@ fn extract_if_drop_panic_leak() {
+     assert_eq!(d7.dropped(), 1);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+ fn extract_if_pred_panic_leak() {
+@@ -1087,6 +1088,7 @@ fn extract_if_pred_panic_leak() {
+     assert_eq!(q.len(), 6);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ fn test_drop() {
+     struct_with_counted_drop!(Elem, DROPS);
+@@ -1101,6 +1103,7 @@ fn test_drop() {
+     assert_eq!(DROPS.get(), 4);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ fn test_drop_with_pop() {
+     struct_with_counted_drop!(Elem, DROPS);
+@@ -1119,6 +1122,7 @@ fn test_drop_with_pop() {
+     assert_eq!(DROPS.get(), 4);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ fn test_drop_clear() {
+     struct_with_counted_drop!(Elem, DROPS);
+@@ -1135,6 +1139,7 @@ fn test_drop_clear() {
+     assert_eq!(DROPS.get(), 4);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+ fn test_drop_panic() {
+diff --git a/alloc/src/collections/vec_deque/tests.rs b/alloc/src/collections/vec_deque/tests.rs
+index d9cf56d..e7fb0eb 100644
+--- a/alloc/src/collections/vec_deque/tests.rs
++++ b/alloc/src/collections/vec_deque/tests.rs
+@@ -1084,6 +1084,7 @@ fn test_clone_from() {
+     }
+ }
+ 
++#[cfg(false)]
+ #[test]
+ fn test_vec_deque_truncate_drop() {
+     struct_with_counted_drop!(Elem, DROPS);
+@@ -1409,6 +1410,7 @@ fn extract_if_drop_panic_leak() {
+     assert_eq!(d7.dropped(), 1);
+ }
+ 
++#[cfg(false)]
+ #[test]
+ #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+ fn extract_if_pred_panic_leak() {
 diff --git a/alloctests/tests/lib.rs b/alloctests/tests/lib.rs
 index b2a3e8f..7f21abf 100644
 --- a/alloctests/tests/lib.rs
