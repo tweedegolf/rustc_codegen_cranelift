@@ -5,9 +5,13 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use rustc_ast::expand::allocator::{
     AllocatorMethod, AllocatorTy, NO_ALLOC_SHIM_IS_UNSTABLE, default_fn_name, global_fn_name,
 };
-use rustc_symbol_mangling::mangle_internal_symbol;
 
 use crate::prelude::*;
+
+fn mangle_internal_symbol(tcx: TyCtxt<'_>, item_name: &str) -> String {
+    let name = rustc_symbol_mangling::mangle_internal_symbol(tcx, item_name);
+    if name.contains("7___rustc") { name.replace("7___rustc", "12___rustc_clif") } else { name }
+}
 
 pub(crate) fn codegen(tcx: TyCtxt<'_>, module: &mut dyn Module, methods: &[AllocatorMethod]) {
     let usize_ty = module.target_config().pointer_type();
