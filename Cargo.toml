@@ -52,3 +52,6 @@ unwinding = [] # Not yet included in unstable-features for performance reasons
 
 [package.metadata.rust-analyzer]
 rustc_private = true
+
+[profile.release]
+debug = "full"
