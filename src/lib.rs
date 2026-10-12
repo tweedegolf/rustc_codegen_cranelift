@@ -19,7 +19,9 @@ extern crate rustc_data_structures;
 extern crate rustc_errors;
 extern crate rustc_hir;
 extern crate rustc_index;
+extern crate rustc_interface;
 extern crate rustc_log;
+extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
@@ -38,14 +40,21 @@ use std::sync::Arc;
 
 use cranelift_codegen::isa::TargetIsa;
 use cranelift_codegen::settings::{self, Configurable};
+use rustc_codegen_ssa::back::archive::ArArchiveBuilderBuilder;
+use rustc_codegen_ssa::back::link::link_binary;
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CompiledModules, CrateInfo, TargetConfig, back};
 use rustc_data_structures::unord::UnordSet;
+use rustc_interface::DEFAULT_QUERY_PROVIDERS;
 use rustc_log::tracing::info;
+use rustc_metadata::EncodedMetadata;
 use rustc_middle::dep_graph::WorkProductMap;
+use rustc_middle::ty::SymbolName;
+use rustc_middle::util::Providers;
 use rustc_session::config::{NATIVE_CPU, OutputFilenames};
 use rustc_session::{CodegenBackendInit, EarlySession, IncrCompSession, Session};
 use rustc_span::{Symbol, sym};
+use rustc_structures::CrateType;
 use rustc_target::spec::{Arch, CfgAbi, Env, Os};
 
 pub use crate::config::*;
@@ -212,6 +221,17 @@ impl CodegenBackend for CraneliftCodegenBackend {
         mnemonic == "ret" && sess.target.arch != Arch::S390x
     }
 
+    fn provide(&self, providers: &mut Providers) {
+        providers.queries.symbol_name = |tcx, instance| {
+            let symbol_name = (DEFAULT_QUERY_PROVIDERS.queries.symbol_name)(tcx, instance);
+            if symbol_name.name.contains("7___rustc") {
+                SymbolName::new(tcx, &symbol_name.name.replace("7___rustc", "12___rustc_clif"))
+            } else {
+                symbol_name
+            }
+        };
+    }
+
     fn target_cpu(&self, sess: &Session) -> String {
         // FIXME handle `-Ctarget-cpu=native`
         match sess.opts.cg.target_cpu {
@@ -247,6 +267,40 @@ impl CodegenBackend for CraneliftCodegenBackend {
             .downcast::<rustc_codegen_ssa::back::write::OngoingCodegen<driver::aot::AotDriver>>()
             .unwrap()
             .join(sess, incr_comp_session, crate_info)
+    }
+
+    fn link(
+        &self,
+        sess: &Session,
+        compiled_modules: CompiledModules,
+        mut crate_info: CrateInfo,
+        metadata: EncodedMetadata,
+        outputs: &OutputFilenames,
+    ) {
+        if let Some(exported_symbols) = crate_info.exported_symbols.get_mut(&CrateType::Dylib) {
+            for symbol_export in exported_symbols {
+                if symbol_export.name.contains("7___rustc") {
+                    symbol_export.name = symbol_export.name.replace("7___rustc", "12___rustc_clif");
+                }
+            }
+        }
+        if let Some(linked_symbols) = crate_info.linked_symbols.get_mut(&CrateType::Dylib) {
+            for (name, _) in linked_symbols {
+                if name.contains("7___rustc") {
+                    *name = name.replace("7___rustc", "12___rustc_clif");
+                }
+            }
+        }
+
+        link_binary(
+            sess,
+            &ArArchiveBuilderBuilder,
+            compiled_modules,
+            crate_info,
+            metadata,
+            outputs,
+            self.name(),
+        );
     }
 }
 
