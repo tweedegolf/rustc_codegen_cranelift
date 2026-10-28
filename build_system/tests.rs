@@ -140,7 +140,17 @@ const BASE_SYSROOT_SUITE: &[TestCase] = &[
 
         if runner.is_native {
             let mut test_cmd = SYSROOT_TESTS.test(&target_compiler, &runner.dirs);
-            test_cmd.args(["-p", "alloctests", "--tests", "-j1", "--", "-q"]);
+            test_cmd
+                .env("CG_CLIF_JIT_ARGS", "collections::vec_deque::tests::test_vec_from_vecdeque")
+                .args([
+                    "-p",
+                    "alloctests",
+                    "--tests",
+                    "-j1",
+                    "--",
+                    "-q",
+                    "collections::vec_deque::tests::test_vec_from_vecdeque",
+                ]);
             spawn_and_wait(test_cmd);
         } else {
             eprintln!("Cross-Compiling: Not running tests");

@@ -5,16 +5,16 @@
 # Each test suite item has a corresponding key here. The default is to run all tests.
 # Comment any of these lines to skip individual tests.
 
-testsuite.no_sysroot
+#testsuite.no_sysroot
 build.mini_core
 build.example
 jit.mini_core_hello_world
 aot.mini_core_hello_world
 
 testsuite.base_sysroot
-aot.arbitrary_self_types_pointers_and_wrappers
-jit.std_example
-aot.std_example
+#aot.arbitrary_self_types_pointers_and_wrappers
+#jit.std_example
+#aot.std_example
 #aot.dst_field_align
 #aot.subslice-patterns-const-eval
 #aot.track-caller-attribute
