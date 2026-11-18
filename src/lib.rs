@@ -335,7 +335,7 @@ fn build_isa(sess: &Session, jit: bool) -> Arc<dyn TargetIsa + 'static> {
     let target_tuple = crate::target_tuple(sess);
 
     let mut flags_builder = settings::builder();
-    flags_builder.set("is_pic", if jit { "false" } else { "true" }).unwrap();
+    flags_builder.set("is_pic", "true").unwrap();
     let enable_verifier = if enable_verifier(sess) { "true" } else { "false" };
     flags_builder.set("enable_verifier", enable_verifier).unwrap();
     flags_builder.set("regalloc_checker", enable_verifier).unwrap();
