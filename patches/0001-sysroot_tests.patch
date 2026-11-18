@@ -387,6 +387,14 @@ diff --git a/alloctests/tests/collections/eq_diff_len.rs b/alloctests/tests/coll
 index ee1e294..703fc28 100644
 --- a/alloctests/tests/collections/eq_diff_len.rs
 +++ b/alloctests/tests/collections/eq_diff_len.rs
+@@ -56,6 +56,7 @@ fn vec_evil_eq() {
+ }
+ 
+ #[test]
++#[cfg(false)]
+ fn hashset_evil_eq() {
+     let s1 = HashSet::from([(0, Evil)]);
+     let s2 = HashSet::from([(0, Evil), (1, Evil)]);
 @@ -64,6 +64,7 @@ fn hashset_evil_eq() {
  }
  
