@@ -125,7 +125,7 @@ impl<T: Module> Module for UnwindModule<T> {
     fn define_data(&mut self, data_id: DataId, data: &DataDescription) -> ModuleResult<()> {
         self.module.define_data(data_id, data)?;
         #[cfg(feature = "jit")]
-        if self.jit_debug_symbols {
+        if self.jit_debug_symbols && !self.module.declarations().get_data_decl(data_id).tls {
             self.data_objects.push(data_id);
         }
         Ok(())

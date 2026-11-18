@@ -332,7 +332,7 @@ fn main() {
 
     from_decimal_string();
 
-    #[cfg(all(not(jit), not(all(windows, target_env = "gnu"))))]
+    #[cfg(not(all(windows, target_env = "gnu")))]
     test_tls();
 
     #[cfg(all(not(jit), target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
@@ -507,10 +507,11 @@ impl Thread {
 }
 
 #[thread_local]
-#[cfg(not(jit))]
-static mut TLS: u8 = 42;
+static mut TLS: u64 = 42;
 
-#[cfg(not(jit))]
+#[thread_local]
+static mut TLS2: u64 = 43;
+
 extern "C" fn mutate_tls(_: *mut c_void) -> *mut c_void {
     unsafe {
         TLS = 0;
@@ -518,16 +519,18 @@ extern "C" fn mutate_tls(_: *mut c_void) -> *mut c_void {
     0 as *mut c_void
 }
 
-#[cfg(not(jit))]
 fn test_tls() {
     unsafe {
         assert_eq!(TLS, 42);
+        assert_eq!(TLS2, 43);
 
         let thread = Thread::create(mutate_tls);
         thread.join();
 
         // TLS of main thread must not have been changed by the other thread.
         assert_eq!(TLS, 42);
+        TLS = 44;
+        assert_eq!(TLS2, 43);
 
         puts("TLS works!\n\0" as *const str as *const i8);
     }

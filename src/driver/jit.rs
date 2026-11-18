@@ -314,6 +314,8 @@ fn jit_fn(instance_ptr: *const Instance<'static>) -> *const u8 {
                 return current_ptr;
             }
 
+            let _print_guard = crate::PrintOnPanic(|| format!("panicked while compiling {name}"));
+
             codegen_and_compile_fn(
                 tcx,
                 tcx.output_filenames(()),
