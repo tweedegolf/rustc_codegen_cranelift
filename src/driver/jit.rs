@@ -2,13 +2,15 @@
 //! files.
 
 use std::cell::RefCell;
-use std::ffi::CString;
+use std::ffi::{CStr, CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::sync::{Mutex, OnceLock, mpsc};
 
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
+use libc::{dl_iterate_phdr, dl_phdr_info, size_t};
+use object::{Object, ObjectSymbol, SymbolKind};
 use rustc_codegen_ssa::CrateInfo;
 use rustc_codegen_ssa::base::{allocator_kind_for_codegen, allocator_shim_contents};
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
@@ -72,7 +74,10 @@ fn create_jit_module(
     let isa = crate::build_isa(tcx.sess, true);
     let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
     crate::compiler_builtins::register_functions_for_jit(&mut jit_builder);
-    jit_builder.symbol_lookup_fn(dep_symbol_lookup_fn(tcx.sess, crate_info.clone()));
+    let (symbol_lookup_fn, tls_symbol_lookup_fn) =
+        dep_symbol_lookup_fn(tcx.sess, crate_info.clone());
+    jit_builder.symbol_lookup_fn(symbol_lookup_fn);
+    jit_builder.tls_symbol_lookup_fn(tls_symbol_lookup_fn);
     jit_builder.symbol("__clif_jit_fn", clif_jit_fn as *const u8);
     let mut jit_module = UnwindModule::new(
         JITModule::new(jit_builder),
@@ -348,7 +353,10 @@ fn jit_fn(instance_ptr: *const Instance<'static>) -> *const u8 {
 fn dep_symbol_lookup_fn(
     sess: &Session,
     crate_info: CrateInfo,
-) -> Box<dyn Fn(&str) -> Option<*const u8> + Send> {
+) -> (
+    Box<dyn Fn(&str) -> Option<*const u8> + Send>,
+    Box<dyn Fn(&str) -> Option<(usize, usize)> + Send>,
+) {
     use rustc_middle::middle::dependency_format::Linkage;
 
     let mut dylib_paths = Vec::new();
@@ -374,23 +382,67 @@ fn dep_symbol_lookup_fn(
         }
     }
 
-    let imported_dylibs = Box::leak(
+    let imported_dylibs = &*Box::leak(
         dylib_paths
             .into_iter()
-            .map(|path| unsafe { libloading::Library::new(&path).unwrap() })
+            .map(|path| {
+                let dylib = unsafe { libloading::Library::new(&path).unwrap() };
+
+                struct CallbackData {
+                    expected_path: CString,
+                    module: usize,
+                }
+
+                let mut data = CallbackData {
+                    expected_path: CString::new(path.as_os_str().as_encoded_bytes()).unwrap(),
+                    module: usize::MAX,
+                };
+                unsafe { dl_iterate_phdr(Some(cb), std::ptr::from_mut(&mut data).cast()) };
+                unsafe extern "C" fn cb(
+                    info: *mut dl_phdr_info,
+                    _size: size_t,
+                    data: *mut c_void,
+                ) -> c_int {
+                    let info = unsafe { &*info };
+                    let data = unsafe { &mut *data.cast::<CallbackData>() };
+                    let actual_path = unsafe { CStr::from_ptr(info.dlpi_name) };
+                    if actual_path == &data.expected_path {
+                        data.module = info.dlpi_tls_modid;
+                    }
+                    0
+                }
+                assert_ne!(data.module, usize::MAX);
+                // FIXME avoid leaking memory
+                let file = object::File::parse(&*Box::leak(
+                    std::fs::read(&path).unwrap().into_boxed_slice(),
+                ))
+                .unwrap();
+                (dylib, file, data.module)
+            })
             .collect::<Box<[_]>>(),
     );
 
     sess.dcx().abort_if_errors();
 
-    Box::new(move |sym_name| {
-        for dylib in &*imported_dylibs {
+    let symbol_lookup_fn = Box::new(move |sym_name: &str| {
+        for (dylib, _, _) in imported_dylibs {
             if let Ok(sym) = unsafe { dylib.get::<*const u8>(sym_name.as_bytes()) } {
                 return Some(*sym);
             }
         }
         None
-    })
+    });
+    let tls_symbol_lookup_fn = Box::new(move |sym_name: &str| {
+        for (_, file, module) in imported_dylibs {
+            if let Some(sym) = file.symbol_by_name(sym_name) {
+                assert_eq!(sym.kind(), SymbolKind::Tls);
+                return Some((*module, sym.address() as usize));
+            }
+        }
+        panic!("{sym_name}");
+        None
+    });
+    (symbol_lookup_fn, tls_symbol_lookup_fn)
 }
 
 fn codegen_shim<'tcx>(

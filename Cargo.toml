@@ -20,6 +20,7 @@ gimli = { version = "0.33", default-features = false, features = ["write"] }
 object = { version = "0.40.0", default-features = false, features = ["std", "read_core", "write", "archive", "coff", "elf", "macho", "pe"] }
 
 indexmap = "2.0.0"
+libc = "0.2.191"
 libloading = { version = "0.9.0", optional = true }
 smallvec = "1.8.1"
 
