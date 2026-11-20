@@ -196,8 +196,8 @@ index 669a783..d2539a5 100644
 +extern crate foo;
 +
  use std::alloc::{GlobalAlloc, Layout, System, set_alloc_error_hook};
+ use std::cell::Cell;
  use std::ffi::CString;
- use std::panic::{AssertUnwindSafe, catch_unwind};
 diff --git a/alloctests/tests/vec_deque_alloc_error.rs b/alloctests/tests/vec_deque_alloc_error.rs
 index 21a9118..866375d 100644
 --- a/alloctests/tests/vec_deque_alloc_error.rs
